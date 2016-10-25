@@ -6,7 +6,8 @@ import pandas as pd
 from pandas import DataFrame
 
 import xgboost as xgb
-from sklearn.cross_validation import KFold, cross_val_score
+from sklearn.metrics import matthews_corrcoef, roc_curve
+from sklearn.model_selection import KFold, cross_val_score
 
 
 # # read production_line_layout part files and append them to a whole file-------------
@@ -30,7 +31,14 @@ from sklearn.cross_validation import KFold, cross_val_score
 # train_startion.to_csv('test_production_line_layout.csv')
 #
 
-train_part_flow = pd.read_csv('train_production_line_layout.csv', index_col=0, chunksize=100000)
+n_train = 1183747
+train_part_flow = pd.read_csv('train_production_line_layout.csv', index_col=0)
+train_part_flow.rename(columns={'Unnamed: 0': 'Id'}, inplace=True)
+test_part_flow = pd.read_csv('test_production_line_layout.csv')
+test_part_flow.rename(columns={'Unnamed: 0': 'Id'}, inplace=True)
+magic_features = pd.read_csv('magic_features.csv', names=['Id', 'Response', 'StartTime',
+                                                          'mg1', 'mg2', 'mg3', 'mg4'], skiprows=[0])
+
 train_part_flow_r1 = pd.read_csv('train_production_line_layout.csv', index_col=0, nrows=10)
 train_part_flow_r1.rename(columns={'Unnamed: 0': 'Id'}, inplace=True)
 
@@ -39,17 +47,79 @@ station_se = pd.Series(station_ar)
 
 start_station_dict = dict(zip(station_ar, np.zeros(len(station_ar))))
 
+part_flow = train_part_flow.append(test_part_flow)
+train_test = part_flow.merge(magic_features, on='Id')
+del train_part_flow, test_part_flow, part_flow, magic_features
+gc.collect()
+
+# print train_test.shape
+# print train_test.columns
+# print np.unique(train_test['Response_x'][:n_train] == train_test['Response_y'][:n_train])
+train_test.drop('Response_y', axis=1, inplace=True)
+train_test.rename(columns={'Response_x': 'Response'}, inplace=True)
+train_test.to_csv('part_flow_and_magic_features.csv')
+# print type(train_test)
+# print train_test.shape
+# print train_test.head(1)
+features = list(station_ar) + ['mg1', 'mg2', 'mg3', 'mg4']
+# print features
+
+# # # train xgboost tree -------------
+# xgb_params = {
+#     'seed': 0,
+#     'colsample_bytree': 0.7,
+#     'silent': 1,
+#     'subsample': 0.7,
+#     'learning_rate': 0.1,
+#     'objective': 'binary:logistic',
+#     'max_depth': 4,
+#     'num_parallel_tree': 1,
+#     'min_child_weight': 2,
+#     'eval_metric': 'auc',
+#     'base_score': 0.005
+# }
+#
+# X_train = train_test[features].iloc[:n_train]
+# y_train = train_test['Response'].iloc[:n_train]
+# X_test = train_test[features].iloc[n_train:]
+# dtrain = xgb.DMatrix(X_train, label=y_train)
+# dtest = xgb.DMatrix(X_test)
+
+# res = xgb.cv(xgb_params, dtrain, num_boost_round=10, nfold=4, seed=0, stratified=True,
+#              early_stopping_rounds=1, verbose_eval=1, show_stdv=True)
+
+# bst = xgb.train(xgb_params, dtrain, 10)
+# preds = bst.predict(dtest)
+
+# # find the best threshold -------------------
+# fpr, tpr, thresholds = roc_curve(y_train, preds, pos_label=1)
+# threshold_var = []
+# for num in np.arange(0, max(preds), max(preds)/100.):
+#     threshold_var.append([num, matthews_corrcoef(y_train, preds > num)])
+# threshold_var = pd.DataFrame(threshold_var, columns=['thresholds', 'mcc'])
+# i_max_mcc = threshold_var['mcc'].idxmax()
+# best_threshold = threshold_var['thresholds'][i_max_mcc]
+# print best_threshold, threshold_var['mcc'].max()
+
+# # predict ---------------------
+# print len(preds)
+# print len(X_test)
+# result = pd.DataFrame((preds > 0.2767).astype(int), index=train_test['Id'][n_train:])
+# result.to_csv('submission_1025.csv', header=['Response'])
+
+# bst = xgb.train(xgb_params, dtrain, 10)
+# test_part_flow = pd.read_csv('test_production_line_layout.csv')
+# test_part_flow.rename(columns={'Unnamed: 0': 'Id'}, inplace=True)
+# X_test = test_part_flow.iloc[:, 1:]
+# y_test = bst.predict(X_test)
 
 
-
-# train xgboost tree -------------
-# X = train_part_flow.iloc[:, 1:-1]
-# Y = train_part_flow.iloc[:, -1]
 # prior = np.sum(Y) / (1.*len(Y))
 # clf = xgb.XGBClassifier(seed=0, silent=1, learning_rate=0.1, objective='binary:logistic',
 # max_depth=4, min_child_weight=2, base_score=prior)
 # clf.fit(X, Y)
-
+# dtrain = xgb.DMatrix(X_train, label=y_train)
+# dtest = xgb.DMatrix(X_test)
 # kf = KFold(n=len(X), n_folds=5, shuffle=False, random_state=False)
 # for iTrain, iTest in kf:
 #     xTrain, yTrain = X.iloc[iTrain, :], Y.iloc[iTrain]
